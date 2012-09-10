@@ -6,6 +6,7 @@ class Nsync_Posts {
 	static $own_post = null;
 	static $remote_post = null;
 	static $previous_to = null;
+	static $previous_from = null;
 	static $new_categories = array();
 	static $new_hierarchical_taxonomies = array();
 	static $attachments = null;
@@ -15,6 +16,8 @@ class Nsync_Posts {
 	static $current_attach_data = array();
 	static $featured_image = false;
 	static $custom_fields = null;
+	
+	static $currently_published_to = array();
 	
 	
 	public static function save_postdata( $post_id, $post ) {
@@ -32,9 +35,10 @@ class Nsync_Posts {
 		
 		// verify this came from the our screen and with proper authorization,
 		// because save_post can be triggered at other times
-		if ( !wp_verify_nonce( $_POST['nsync_noncename'], 'nsync' ) )
+		if ( !wp_verify_nonce( $_POST['nsync_noncename'], 'nsync' ) ):
+			// delete the connection 
 			return;
-	
+		endif;
 		
 		
 		// don't go into an infinate loop
@@ -49,7 +53,7 @@ class Nsync_Posts {
 		$blogs_to_post_to = $_POST['nsync_post_to'];
 		
 		// where did we previously created or updated a post… used for making sure that we update the same post
-		self::$previous_to = get_post_meta( $post_id, 'nsync-to', false );
+		self::$previous_to = get_post_meta( $post_id, '_nsync-to', false );
 				
 		// we are going to remove stuff from here
 		Nsync_Posts::clean_post( $post ); // 
@@ -99,14 +103,13 @@ class Nsync_Posts {
 			endforeach;
 			
 			add_settings_error( 'edit_post', 'the-id', 'hello', 'update' );
+			
 			Nsync_Posts::update_nsync_to( $post_id, $to );
 			
-		
+			setcookie( "nsync_update_".$post_id, serialize ($to), time()+60*5 ) ;
+			
 		endif;
-		
-		// Do something with $mydata 
-		// probably using add_post_meta(), update_post_meta(), or 
-		// a custom table (see Further Reading section below)
+			
 	}
 	
 	public static function clean_post( $post ) {
@@ -292,7 +295,7 @@ class Nsync_Posts {
 		
 		$fields = get_post_custom( $post_id );
 		
-		$exclude = array( 'nsync-to', 'nsync-from' );
+		$exclude = array( '_nsync-to', 'nsync-from' );
 		foreach( $fields as $key => $values ):
 				
 			if( $key[0] != '_' && !in_array( $key, $exclude ) )
@@ -317,7 +320,7 @@ class Nsync_Posts {
 		echo "</pre>";
 		*/
 		
-		do_action('nsync_before_insert');
+		do_action( 'nsync_before_insert' );
 		if( isset( $nsync_options['force_user'] ) &&  $nsync_options['force_user'] ):
 			if( user_can( self::$remote_post->post_author, 'publish_post' ) )
 				return wp_insert_post( self::$remote_post );
@@ -355,6 +358,7 @@ class Nsync_Posts {
 						wp_delete_attachment( $delete->ID, true );
 				endif;
 			}
+			
 			foreach( self::$attachments as $attachment):
 				
 				$current_attachment_id = $attachment->ID;
@@ -423,24 +427,22 @@ class Nsync_Posts {
 	public static function update_nsync_to( $post_id, $to ) {
 		// update the to			
 		if( self::$previous_to == null ) 
-			add_post_meta( $post_id, 'nsync-to', $to, true );  
+			add_post_meta( $post_id, '_nsync-to', $to, true );  
 		else
-			update_post_meta( $post_id, 'nsync-to', $to, self::$previous_to );
+			update_post_meta( $post_id, '_nsync-to', $to, self::$previous_to );
 	}
-	
 	
 	public static function update_message( $messages ) {
 		global $post;
 		
-		self::$previous_to = get_post_meta( $post->ID, 'nsync-to', true );
-			
-		if( !empty( self::$previous_to )  ):
-			
-			foreach( self::$previous_to as $blog_id => $post_id ):
+		if( !empty( $_COOKIE['nsync_update_'.$post->ID] )  ):
+			// setcookie("nsync_update", null, time()-3600);
+			$cookie = unserialize ( $_COOKIE['nsync_update_'.$post->ID] );
+			foreach( $cookie as $blog_id => $post_id ):
 				$bloginfo = get_blog_details( array( 'blog_id' => $blog_id ) );
 				$end[] = '<em>'.$bloginfo->blogname.'</em> <a href="'.esc_url( $bloginfo->siteurl ).'/?p='.$post_id.'">view post</a>';
 			endforeach;
-			
+			setcookie( 'nsync_update_'.$post->ID, null, time()-3600 );
 			$end = " " . implode( ", ",  $end );
 		
 			$messages['post'][1] .= '. - Also updated post on '. $end;
@@ -454,7 +456,6 @@ class Nsync_Posts {
 		return $messages;
 	}
 	
-	
 	public static function trash_or_untrash_post( $post_id ) {
 		
 		if( self::$currently_publishing )
@@ -467,7 +468,7 @@ class Nsync_Posts {
 		
 		// lets see if we have any post that this is pushing to 
 		// where did we previously created or updated a post… used for making sure that we update the same post
-		$previous_to = get_post_meta( $post_id, 'nsync-to', true);
+		$previous_to = get_post_meta( $post_id, '_nsync-to', true);
 		if( empty( $previous_to ) )
 			return;
 		
@@ -488,10 +489,9 @@ class Nsync_Posts {
 		
 	}
 	
-	public static function display_sync( $actions, $post ) {
+	public static function posts_display_sync( $actions, $post ) {
 		
-		
-		self::$previous_to = get_post_meta( $post->ID, 'nsync-to', true );
+		self::$previous_to = get_post_meta( $post->ID, '_nsync-to', true );
 		
 		if( !empty( self::$previous_to )  ):
 			
@@ -504,8 +504,20 @@ class Nsync_Posts {
 	
 			$actions['sync'] = "Also posted to: ".$end;
 		endif;
+		if( !defined( 'NSYNC_BASENAME') ):
+			// do this if nsync is not present
+			unset($end);
+			self::$previous_from = get_post_meta( $post->ID, '_nsync-from', true );
+			
+			if( !empty( self::$previous_from )  ):
+				$bloginfo = get_blog_details( array( 'blog_id' => self::$previous_from['blog'] ) );
+				$end = '<em>'.$bloginfo->blogname.'</em> <a href="'.esc_url( $bloginfo->siteurl ).'/?p='.self::$previous_from['post_id'].'">view post</a>';
+				
+				$actions['sync'] = "Originally posted on: ".$end;
+			endif;
+		endif;
+		
 		return $actions;
 	}
-	
 }
 

@@ -6,6 +6,7 @@ class Nsync_Push {
 	static $settings = array();
 	static $currently_publishing = false;
 	static $post_from = array();
+	static $previous_from = null;
 	
 	public static function admin_init() {
 		//
@@ -25,42 +26,43 @@ class Nsync_Push {
 		
 	}
 	
-	// this displays the if the post if coming from somewhere else. 
-	public static function post_from_site() {
-		global $post;
-		self::$post_from = get_post_meta( $post->ID, 'nsync-from', true);
-		
-		if( !empty(self::$post_from) ) {
-			$bloginfo = get_blog_details( array( 'blog_id' => self::$post_from['blog'] ) ); ?>
-			<div class="misc-pub-section" id="shell-site-to-post">This post is currently being updated from <br />
-				<a href="<?php echo esc_url( $bloginfo->siteurl );?>"><?php echo $bloginfo->blogname; ?></a>
-			</div>
-			<?php
-		}
-	}
+	
 	/* POST SIDE */
 	public static function user_select_site() {
 		global $post;
 		$post_to = get_option( 'nsync_post_to' );
 		$current_blog_id = get_current_blog_id();
 		
+		// lets make sure that the profile 
+		if( !defined( 'NSYNC_DIR_PATH' ) ):
+			self::$post_from = get_post_meta( $post->ID, '_nsync-from', true);
+		
+			if( !empty(self::$post_from) ) :
+				$bloginfo = get_blog_details( array( 'blog_id' => self::$post_from['blog'] ) ); ?>
+				<div class="misc-pub-section" id="shell-site-to-post">Originally posted on:
+					<em><?php echo $bloginfo->blogname; ?></em> <a href="<?php echo esc_url( $bloginfo->siteurl ); ?>'/?p=<?php self::$post_from['post_id']; ?>">view post</a>
+				</div>
+			<?php
+			endif;
+		endif;
 		
 		if( empty(self::$post_from) ):
-			// change this line if you also want to effect pages. 
-			
+		
+			// change this line if you also want to effect pages or other post types. 
 			if( is_array( $post_to ) && $post->post_type == 'post' && !empty($post_to) ):
 				
 				// double check if this  really the case
 				$new_post_to = array();
 				
-				$previous_to = get_post_meta( $post->ID, 'nsync-to', false );
+				$previous_to = get_post_meta( $post->ID, '_nsync-to', false );
 				
 				foreach( $post_to as $blog_id ): 
 						switch_to_blog( $blog_id );
 						$option =	get_option( 'nsync_options' );
 						
 						$skip = true;
-						if( in_array( $current_blog_id, $option['active'] ) ):
+						
+						if( is_array($option['active']) && in_array( $current_blog_id, $option['active'] ) ):
 							$new_post_to[] = $blog_id;
 							$skip = false;
 						endif;
