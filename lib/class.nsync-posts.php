@@ -94,7 +94,7 @@ class Nsync_Posts {
 						$to[ $blog_id ] = $new_post_id;
 						// update the post 
 						// update the to
-						add_post_meta( $new_post_id, 'nsync-from', $from, true );
+						add_post_meta( $new_post_id, '_nsync-from', $from, true );
 					endif;
 					
 				endif;
@@ -493,7 +493,7 @@ class Nsync_Posts {
 		
 		self::$previous_to = get_post_meta( $post->ID, '_nsync-to', true );
 		
-		if( !empty( self::$previous_to )  ):
+		if( !empty( self::$previous_to ) && is_array( self::$previous_to ) ):
 			
 			foreach( self::$previous_to as $blog_id => $post_id ):
 				$bloginfo = get_blog_details( array( 'blog_id' => $blog_id ) );
@@ -509,7 +509,7 @@ class Nsync_Posts {
 			unset($end);
 			self::$previous_from = get_post_meta( $post->ID, '_nsync-from', true );
 			
-			if( !empty( self::$previous_from )  ):
+			if( !empty( self::$previous_from ) && is_array( self::$previous_from ) ):
 				$bloginfo = get_blog_details( array( 'blog_id' => self::$previous_from['blog'] ) );
 				$end = '<em>'.$bloginfo->blogname.'</em> <a href="'.esc_url( $bloginfo->siteurl ).'/?p='.self::$previous_from['post_id'].'">view post</a>';
 				
