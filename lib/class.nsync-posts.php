@@ -5,7 +5,7 @@ class Nsync_Posts {
 	static $current_blog_id = null;
 	static $own_post = null;
 	static $remote_post = null;
-	static $previous_to = null;
+	static $previous_to = null;	//how holds maximum number of other sites posted to to save their post_id
 	static $previous_from = null;
 	static $new_categories = array();
 	static $new_hierarchical_taxonomies = array();
@@ -16,9 +16,7 @@ class Nsync_Posts {
 	static $current_attach_data = array();
 	static $featured_image = false;
 	static $custom_fields = null;
-	
-	static $currently_published_to = array();
-	
+	static $last_publish_to = null;	//holds info on last selected site for post meta
 	
 	public static function save_postdata( $post_id, $post ) {
 	
@@ -26,16 +24,15 @@ class Nsync_Posts {
 		// If it is our form has not been submitted, so we dont want to do anything
 		if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) return;
 		// Check permissions
-		if ( 'post' == $_POST['post_type'] && $post->post_type == 'post'  ){
+		if (isset($_POST['post_type']) && 'post' == $_POST['post_type'] && $post->post_type == 'post'  ){
 			if ( !current_user_can( 'edit_post', $post_id ) )
 			    return;
 		} else {
 			return;
 		}
-		
 		// verify this came from the our screen and with proper authorization,
 		// because save_post can be triggered at other times
-		if ( !wp_verify_nonce( $_POST['nsync_noncename'], 'nsync' ) ):
+		if (isset($_POST['nsync_noncename']) && !wp_verify_nonce( $_POST['nsync_noncename'], 'nsync' ) ):
 			// delete the connection 
 			return;
 		endif;
@@ -49,11 +46,27 @@ class Nsync_Posts {
 		
 		self::$currently_publishing = true;
 		
-		// OK, we're authenticated: we need to find and save the data
-		$blogs_to_post_to = $_POST['nsync_post_to'];
+		// where did we previously created or updated a post, used for making sure that we update the same post
+		Nsync_Posts::$previous_to = get_post_meta( $post_id, '_nsync-to', false );
 		
-		// where did we previously created or updated a post… used for making sure that we update the same post
-		self::$previous_to = get_post_meta( $post_id, '_nsync-to', false );
+		// OK, we're authenticated: we need to find and save the data
+		if (isset($_POST['nsync_post_to'])) {
+			$blogs_to_post_to = $_POST['nsync_post_to'];
+			add_post_meta($post_id, '_nsync_last_published_to', $blogs_to_post_to, true) || update_post_meta($post_id, '_nsync_last_published_to', $blogs_to_post_to);
+		} else {
+			$nsync_plugin = 'nsync'.DIRECTORY_SEPARATOR.'nsync.php';
+			if (is_plugin_active($nsync_plugin)) {				
+				add_post_meta($post_id, '_nsync_last_published_to', array(), true) || update_post_meta($post_id, '_nsync_last_published_to', array());
+			}
+			// also need to trash all external posts before returning
+			$trash = Nsync_Posts::_trash_posts(array());
+			
+			//show message
+			if (!empty($trash)) {
+				setcookie( "nsync_trash_".$post_id, serialize ($trash['newly_trashed_ids']), time()+60*5 );
+			}
+			return;
+		}
 				
 		// we are going to remove stuff from here
 		Nsync_Posts::clean_post( $post ); // 
@@ -65,11 +78,24 @@ class Nsync_Posts {
 			
 			$from = array( 'blog' => self::$current_blog_id, 'post_id' => $post_id );
 			$to = array(); // a list of sites and post that we are publishing to
+			Nsync_Posts::$last_publish_to = get_post_meta($post_id, '_nsync_last_published_to', true);
 			
+			//trash posts 
+			$trash = Nsync_Posts::_trash_posts();
+			
+			//add post
 			foreach( $blogs_to_post_to as $blog_id ):
-				
+
 				switch_to_blog( $blog_id ); // save the post on the a different site
-				
+
+				//check if trashed, if so, untrash!
+				$other_post_id = isset(Nsync_Posts::$previous_to[0][$blog_id]) ? Nsync_Posts::$previous_to[0][$blog_id] : 0;
+				if (!empty($other_post_id)) {
+					if ( get_post_status($other_post_id) == 'trash') {
+						wp_untrash_post($other_post_id);
+					}
+				}
+			
 				unset( $nsync_options );
 				$nsync_options = get_option( 'nsync_options' );
 				// can I accually post there? 
@@ -77,20 +103,16 @@ class Nsync_Posts {
 				// double check that the current site accually allows you to publish here
 				if( in_array( self::$current_blog_id, $nsync_options['active'] ) ):
 					// create the new post
-					
 					Nsync_Posts::set_post_id( $blog_id );
 					Nsync_Posts::replicate_categories( $nsync_options );
 					Nsync_Posts::replicate_hierarchical_taxonomies( $nsync_options );
 					Nsync_Posts::set_post_status( $nsync_options, $post );
 					
-					
-					
 					$new_post_id = Nsync_Posts::insert_post( $nsync_options );			
 					Nsync_Posts::replicate_post_meta( $new_post_id  );
 					Nsync_Posts::replicate_attachments( $nsync_options, $new_post_id );
 					
-					
-					if( isset( $new_post_id ) ):
+					if( !is_null( $new_post_id ) && $new_post_id != 0 ):
 						$to[ $blog_id ] = $new_post_id;
 						// update the post 
 						// update the to
@@ -101,14 +123,11 @@ class Nsync_Posts {
 				
 				restore_current_blog(); // revet to the current blog 
 			endforeach;
-			
 			add_settings_error( 'edit_post', 'the-id', 'hello', 'update' );
-			
 			Nsync_Posts::update_nsync_to( $post_id, $to );
-			
 			setcookie( "nsync_update_".$post_id, serialize ($to), time()+60*5 ) ;
-			
-		endif;
+			setcookie( "nsync_trash_".$post_id, serialize ($trash['newly_trashed_ids']), time()+60*5 ) ;
+			endif;
 			
 	}
 	
@@ -181,11 +200,10 @@ class Nsync_Posts {
 		$terms = wp_get_object_terms( $post_id, $taxonomies  );
 		$new_terms = array();
 		
-		
 		foreach( $terms as $term ):
 			
 			if($term->taxonomy == 'category'):
-				self::$new_categories[] = $term->name; // categories neews to have 
+				self::$new_categories[] = $term; // categories neews to have 
 			elseif( is_taxonomy_hierarchical( $term->taxonomy ) ):
 				self::$new_hierarchical_taxonomies[$term->taxonomy][] = $term->name;
 			else:
@@ -252,29 +270,47 @@ class Nsync_Posts {
 	}
 	
 	public static function replicate_categories( $nsync_options ) {
+		$new_category_ids = array();	//to hold ids of newly create categories!
+		$existing_category_slugs = array();	//array of destination slugs and term_ids to compare against
+		$current_blogs_category = get_categories(array('hide_empty'=> 0));
+		$include_new_cats_tags = isset($nsync_options['include_new_cats_tags'])? $nsync_options['include_new_cats_tags'] : false;
 		
-		$new_categoriy_ids = array();
-					
+		//create term_id => name array
+		foreach ($current_blogs_category as $cat) {
+			$existing_category_slugs[$cat->term_id] = $cat->slug;
+		}
+		
 		foreach( self::$new_categories as $new_category ):
-			$new_categoriy_ids[] = wp_create_category( $new_category );
+			if (!isset($include_new_cats_tags) || empty($include_new_cats_tags)) {
+				$new_category_ids[] = wp_create_category( $new_category->name );
+			} else {
+				//only allow categories to match if they exist in destination's blog
+				$found_cat_id = array_search($new_category->slug, $existing_category_slugs);
+				if ($found_cat_id) {
+					$new_categoriy_ids[] = $found_cat_id;
+				}
+			}
 		endforeach;
 		
 		// add the post to a specific category
 		if( isset( $nsync_options['category'] ) 
 			&& $nsync_options['category'] != '-1' 
-			&& in_array( $nsync_options['category'], $new_categoriy_ids ) ): 
-			$new_categoriy_ids[] = $nsync_options['category'];
+			&& in_array( $nsync_options['category'], $new_category_ids ) ): 
+			$new_categoriy_ds[] = $nsync_options['category'];
 			
 		endif;
 		
-		if( !empty( $new_categoriy_ids ) ):
-			self::$remote_post->post_category = $new_categoriy_ids;
+		if( !empty( $new_category_ids ) ):
+			self::$remote_post->post_category = $new_category_ids;
 		endif;
-	
 	}
 	
+	/**
+	 * 
+	 * @param unknown $nsync_options
+	 * @TODO might need to update this function for heirarchical stuff.... but not sure.
+	 */
 	public static function replicate_hierarchical_taxonomies( $nsync_options ) {
-		
 		$new_taxonomy = array();
 					
 		foreach( self::$new_hierarchical_taxonomies as $taxonomy => $terms ):
@@ -285,7 +321,6 @@ class Nsync_Posts {
 		endforeach;
 		
 		self::$remote_post->tax_input = array_merge( self::$remote_post->tax_input, $new_taxonomy );
-	
 	}
 	
 	public static function setup_post_meta( $post_id ) {
@@ -319,16 +354,16 @@ class Nsync_Posts {
 		var_dump(self::$remote_post->tax_input);
 		echo "</pre>";
 		*/
-		
 		do_action( 'nsync_before_insert' );
-		if( isset( $nsync_options['force_user'] ) &&  $nsync_options['force_user'] ):
-			if( user_can( self::$remote_post->post_author, 'publish_post' ) )
+		if( isset( $nsync_options['force_user'] ) &&  $nsync_options['force_user'] ) {
+			if( user_can( self::$remote_post->post_author, 'publish_post' ) ) {
 				return wp_insert_post( self::$remote_post );
-			else
+			} else {
 				return null;
-		else:
+			}
+		} else {	//for the case where we don't set force_user, so anyone can post!
 			return wp_insert_post( self::$remote_post );
-		endif;
+		}
 	}
 	
 	public static function replicate_post_meta( $new_post_id ) {
@@ -453,6 +488,30 @@ class Nsync_Posts {
 			$messages['post'][9] .= '. - Also scheduled the post on '. $end;
 			$messages['post'][10] .= '. - Also updated draft on '. $end;
 		endif;
+		
+		//add trash messages!
+		if( !empty( $_COOKIE['nsync_trash_'.$post->ID] )  ) {
+			// setcookie("nsync_update", null, time()-3600);
+			$cookie = unserialize ( $_COOKIE['nsync_trash_'.$post->ID] );
+			foreach( $cookie as $blog_id => $post_id ):
+				$bloginfo_trash = get_blog_details( array( 'blog_id' => $blog_id ) );
+				$trash_end[] = '<em>'.$bloginfo_trash->blogname.'</em> <a href="'.esc_url( $bloginfo_trash->siteurl ).'/?p='.$post_id.'">view post</a>';
+			endforeach;
+			setcookie( 'nsync_trash_'.$post->ID, null, time()-3600 );
+			
+			if (!empty($trash_end)) {
+				$end = " " . implode( ", ",  $trash_end );
+			
+				$messages['post'][1] .= '. - Also trashed post on '. $end;
+				$messages['post'][4] .= '. - Also trashed post on '. $end;
+				$messages['post'][6] .= '. - Also trashed post on '. $end;
+				$messages['post'][7] .= '. - Also trashed on '. $end;
+				$messages['post'][8] .= '. - Also trashed posted on '. $end;
+				$messages['post'][9] .= '. - Also trashed the post on '. $end;
+				$messages['post'][10] .= '. - Also trashed draft on '. $end;
+			}
+		}
+		
 		return $messages;
 	}
 	
@@ -461,7 +520,14 @@ class Nsync_Posts {
 		if( self::$currently_publishing )
 			return;
 		
-		$post = wp_get_single_post($post_id, ARRAY_A);
+		//updated section due to deprication of wp_get_single_post()
+		$blogversion = get_bloginfo('version');
+		$post = null;
+		if (version_compare($blogversion, '3.5', '<=')) {
+			$post = wp_get_single_post($post_id, ARRAY_A);
+		} else {
+			$post = get_post($post_id);
+		}
 		
 		if( !$post )
 			return; 
@@ -519,5 +585,153 @@ class Nsync_Posts {
 		
 		return $actions;
 	}
-}
+	
+	/**
+	 * modifies single posts to add source template before or after posts
+	 * 
+	 * @param unknown $content
+	 * @return Ambigous <string, unknown>
+	 */
+	public static function nsync_post_edit_single_post($content) {
+		unset( $nsync_options );
+		$nsync_options = get_option( 'nsync_options' );
 
+		$return_content = '';
+		if (is_single()) {
+			$pre_content = '';
+			$post_content = '';
+			if (isset($nsync_options['source_before']) && $nsync_options['source_before']) {
+				$pre_content = Nsync_Posts::process_source_template();
+			} 
+			if (isset($nsync_options['source_after']) && $nsync_options['source_after']) {
+				$post_content = Nsync_Posts::process_source_template();
+			} 
+			$return_content = $pre_content.$content.$post_content;
+		} else {
+			$return_content = $content;
+		}
+		return $return_content;
+	}
+	
+	/**
+	 * private function to convert special tags in the source tempate into actual values
+	 * - valid values: 
+	 *  - - {site permalink}
+	 *  - - {post permalink}
+	 *  - - {post date}
+	 *  - - {post title}
+	 *  - - {post author}
+	 *  - - {site name}
+	 * 
+	 * @return string
+	 */
+	private static function process_source_template() {
+		global $post;
+
+		$nsync_options = get_option( 'nsync_options' );
+		self::$previous_from = get_post_meta($post->ID, '_nsync-from', true);
+		$return_value = $blogname = $post_url = $site_url = '';
+
+		if( !empty( self::$previous_from ) && is_array( self::$previous_from ) ) {
+			$bloginfo = get_blog_details(array('blog_id' => self::$previous_from['blog']));
+			$blogname = $bloginfo->blogname;
+			$post_url = esc_url($bloginfo->siteurl).'/?p='.self::$previous_from['post_id'];
+			$site_url = esc_url($bloginfo->siteurl);
+		}
+		$template = (isset($nsync_options['source_template'])? $nsync_options['source_template'] : Nsync::$default_source_template);
+		
+		//do the {site permalink}
+		if (!empty($site_url) && !empty($blogname)) {
+			$template = str_ireplace("{site permalink}", $site_url, $template);
+		}
+		//do the {post permalink}
+		if (!empty($post_url) && !empty($post)) {
+			$template = str_ireplace("{post permalink}", $post_url, $template);
+		}
+		//do the {post date}, {post title}, {post author}
+		if (!empty($post)) {
+	 		$template = str_ireplace("{post date}", $post->post_date, $template);
+	 		$template = str_ireplace("{post title}", $post->post_title, $template);
+	 		$template = str_ireplace("{post author}", $post->post_author, $template);
+		}
+		//do the {site name}
+		if (!empty($blogname)) {
+ 			$template = str_ireplace("{site name}", $blogname, $template);
+		}
+ 		
+ 		return $template;
+	}
+	
+	public static function nsync_post_link( $url, $post, $leavename ) {	
+		//check if it's a post from nsync
+		$nsync_options = get_option( 'nsync_options' );
+		$link_to_source = (isset($nsync_options['link_to_source'])? $nsync_options['link_to_source'] : 0 );
+		if (empty($link_to_source) || is_admin()) {
+			return $url;
+		}
+		
+		//ok, it's a post, so make permalink show link to original source or current page in blog
+		$post_meta = get_post_meta( $post->ID, '_nsync-from', true );
+		if (!empty($post_meta) && is_array($post_meta)) {
+			$bloginfo = get_blog_details(array('blog_id' => $post_meta['blog']));
+			$post_url = esc_url($bloginfo->siteurl).'/?p='.$post_meta['post_id'];
+			return $post_url;
+		}
+
+		return $url;
+	}
+	
+	public static function nsync_shortlink() {
+		global $post;
+
+		$nsync_options = get_option( 'nsync_options' );
+		$link_to_source = (isset($nsync_options['link_to_source'])? $nsync_options['link_to_source'] : 0 );
+		if (!empty($link_to_source) && is_single($post)) {
+			remove_action('wp_head', 'wp_shortlink_wp_head', 10, 1);
+			?>
+			<link rel="shortlink" href="<?php echo Nsync_Posts::nsync_post_link(get_permalink($post->ID), $post, '')?>">
+			 <?php 
+		}
+	}
+
+	/**
+	 * private trashing function on a per post basis in
+	 * @param string $force_all
+	 */
+	private static function _trash_posts($last_post_to = null) {
+		//trash posts
+		$last_publish_to = (!is_null($last_post_to) ? $last_post_to : Nsync_Posts::$last_publish_to);
+		$previous_to_blog_ids = !empty(Nsync_Posts::$previous_to[0]) ? array_keys(Nsync_Posts::$previous_to[0]) : array();
+		$trash_blog_ids = array_diff($previous_to_blog_ids, $last_publish_to);
+		$trashed_already_ids = array();	//used to store previous trashed ids
+		$newly_trashed_ids = array();	//store newly trashed ids, this and $trashed_already_ids used for messages.
+		
+		foreach ($trash_blog_ids as $blog_id) {
+			switch_to_blog($blog_id);
+		
+			//to be trashed on remote site as
+			$other_post_id = isset(Nsync_Posts::$previous_to[0][$blog_id]) ? Nsync_Posts::$previous_to[0][$blog_id] : 0;
+			if (!empty($other_post_id)) {
+ 				if (get_post_status($other_post_id) != 'trash') {
+					wp_trash_post($other_post_id);
+					$newly_trashed_ids[$blog_id] = $other_post_id;
+				} else {
+					$trashed_already_ids[$blog_id] = $other_post_id;
+				}
+			}
+		
+			restore_current_blog();
+		}
+		
+		//massage return array to look like previous_to format array(blog_id => post_id, ...)
+		$formatted_trashed_array = array();
+		foreach ($trash_blog_ids as $blog_id) {
+			$formatted_trashed_array['all_ids'][$blog_id] = Nsync_Posts::$previous_to[0][$blog_id];
+		}
+		//adding in detailed meta
+		$formatted_trashed_array['alrady_trashed_ids'] = $trashed_already_ids;
+		$formatted_trashed_array['newly_trashed_ids'] = $newly_trashed_ids;
+
+		return $formatted_trashed_array;
+	}
+}

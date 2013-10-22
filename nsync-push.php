@@ -3,7 +3,7 @@
 Plugin Name: Nsync Push
 Plugin URI: http://github.com/ubc/nsync-push
 Description: Nsync Push allows you to push content to a different site.
-Version: 1
+Version: 1.1
 Author: ctlt
 Author URI: 
 License: GPLv2 or later.
@@ -36,3 +36,7 @@ add_action( 'untrash_post',  		array( 'Nsync_Posts', 'trash_or_untrash_post' ), 
 add_filter( 'post_row_actions' , 	array( 'Nsync_Posts', 'posts_display_sync' ), 10, 2);
 
 add_filter( 'post_updated_messages',array( 'Nsync_Posts', 'update_message' ) );
+
+add_filter('the_content', array( 'Nsync_Posts', 'nsync_post_edit_single_post'));
+add_filter('post_link', array('Nsync_Posts', 'nsync_post_link'), 10, 3);
+add_action('get_header', array('Nsync_Posts', 'nsync_shortlink'), 10, 1);

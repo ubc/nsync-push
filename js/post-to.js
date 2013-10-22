@@ -9,6 +9,7 @@ var Nsync_Post_To = {
 		}
 		jQuery("#shell-site-to-post").hoverIntent( conf );
 		jQuery("#site-to-post input").change(Nsync_Post_To.update)
+		Nsync_Post_To.update();
 	},
 	
 	show : function() {
