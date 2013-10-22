@@ -22,7 +22,7 @@ class Nsync_Push {
 		
 		add_settings_field(
 		'nsync_default', // id
-		'Default Network sites published to', // setting title
+		'Default Network Sites Published To', // setting title
 		array( 'Nsync_Push', 'add_network_sites'), // display callback
 		'writing', // settings page
 		'remote_publishing' // settings section
@@ -157,9 +157,12 @@ class Nsync_Push {
 								}
 							}
 						?>
-						<label><input type="checkbox" name="nsync_post_to[]" value="<?php echo esc_attr($blog->blog_id); ?>" <?php echo checked( $is_checked ); ?> alt="<?php echo esc_attr( $blog->blogname);?>" /> <?php echo $blog->blogname;?> <small><?php echo $blog->siteurl;?></small></label>
+						<label><input type="checkbox" name="nsync_post_to[]" value="<?php echo esc_attr($blog->blog_id); ?>" <?php echo checked( $is_checked ); ?> alt="<?php echo esc_attr( $blog->blogname);?>" /> <?php echo $blog->blogname;?> <small><?php echo $blog->siteurl;?></small></label><br>
 						<?php endforeach; ?>
+						<span id='goto_nsync_settings'><a href="<?php echo admin_url().'options-writing.php'; ?>">Settings</a></span>
+						<br>
 					</div>
+					
 				</div>
 				<?php 
 			    wp_nonce_field( 'nsync' , 'nsync_noncename' , false );

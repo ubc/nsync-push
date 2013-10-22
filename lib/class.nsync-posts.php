@@ -557,11 +557,21 @@ class Nsync_Posts {
 	
 	public static function posts_display_sync( $actions, $post ) {
 		
+		//use last publish to, but massage array to minimize code change
 		self::$previous_to = get_post_meta( $post->ID, '_nsync-to', true );
-		
-		if( !empty( self::$previous_to ) && is_array( self::$previous_to ) ):
+		self::$last_publish_to = get_post_meta( $post->ID, '_nsync_last_published_to', true);
+		if (empty(self::$last_publish_to) || empty(self::$previous_to)) {
+			return $actions;
+		}
+
+		$post_check = array();
+		foreach (self::$last_publish_to as $blog_id) {
+			$post_check[$blog_id] = self::$previous_to[$blog_id];
+		}
+
+		if( !empty( $post_check ) && is_array( $post_check ) ):
 			
-			foreach( self::$previous_to as $blog_id => $post_id ):
+			foreach( $post_check as $blog_id => $post_id ):
 				$bloginfo = get_blog_details( array( 'blog_id' => $blog_id ) );
 				$end[] = '<em>'.$bloginfo->blogname.'</em> <a href="'.esc_url( $bloginfo->siteurl ).'/?p='.$post_id.'">view post</a>';
 			endforeach;

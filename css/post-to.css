@@ -1,1 +1,2 @@
-#site-to-post label{ display: block; }
+#site-to-post label{ display: inline; }
+#goto_nsync_settings { float: right; }
