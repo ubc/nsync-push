@@ -22,7 +22,7 @@ class Nsync_Push {
 		
 		add_settings_field(
 		'nsync_default', // id
-		'Default Network Sites Published To', // setting title
+		'Also Publish To Defaults Sites', // setting title
 		array( 'Nsync_Push', 'add_network_sites'), // display callback
 		'writing', // settings page
 		'remote_publishing' // settings section
@@ -57,6 +57,7 @@ class Nsync_Push {
 				<label>
 					<input name="nsync_default[sites][]" type="checkbox" value="<?php echo esc_attr( $blog_id); ?>" <?php checked($is_checked);?>/> <?php echo $blog->blogname;?> <small><?php echo $blog->siteurl;?></small>
 				</label><br />
+				<p>Note: You can always deselect a site on a per post basis.</p>
 			<?php 
 			}
 		} else {
@@ -159,7 +160,7 @@ class Nsync_Push {
 						?>
 						<label><input type="checkbox" name="nsync_post_to[]" value="<?php echo esc_attr($blog->blog_id); ?>" <?php echo checked( $is_checked ); ?> alt="<?php echo esc_attr( $blog->blogname);?>" /> <?php echo $blog->blogname;?> <small><?php echo $blog->siteurl;?></small></label><br>
 						<?php endforeach; ?>
-						<span id='goto_nsync_settings'><a href="<?php echo admin_url().'options-writing.php'; ?>">Settings</a></span>
+						<span id='goto_nsync_settings'><a href="<?php echo admin_url().'options-writing.php#select-default-site'; ?>">Settings</a></span>
 						<br>
 					</div>
 					
