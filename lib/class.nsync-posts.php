@@ -648,7 +648,7 @@ class Nsync_Posts {
 			$post_url = esc_url($bloginfo->siteurl).'/?p='.self::$previous_from['post_id'];
 			$site_url = esc_url($bloginfo->siteurl);
 		}
-		$template = (isset($nsync_options['source_template'])? $nsync_options['source_template'] : Nsync::$default_source_template);
+		$template = (isset($nsync_options['source_template'])? $nsync_options['source_template'] : "source: <a href='{post permalink}'>{post title}</a>");
 		
 		//do the {site permalink}
 		if (!empty($site_url) && !empty($blogname)) {
