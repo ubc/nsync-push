@@ -49,17 +49,21 @@ class Nsync_Posts {
 		// where did we previously created or updated a post, used for making sure that we update the same post
 		Nsync_Posts::$previous_to = get_post_meta( $post_id, '_nsync-to', false );
 		
+		
 		// OK, we're authenticated: we need to find and save the data
-		if (isset($_POST['nsync_post_to'])) {
+		if ( isset($_POST['nsync_post_to'])) {
 			$blogs_to_post_to = $_POST['nsync_post_to'];
 			add_post_meta($post_id, '_nsync_last_published_to', $blogs_to_post_to, true) || update_post_meta($post_id, '_nsync_last_published_to', $blogs_to_post_to);
+			
 		} else {
-			$nsync_plugin = 'nsync'.DIRECTORY_SEPARATOR.'nsync.php';
-			if (is_plugin_active($nsync_plugin)) {				
-				add_post_meta($post_id, '_nsync_last_published_to', array(), true) || update_post_meta($post_id, '_nsync_last_published_to', array());
-			}
+			// $nsync_plugin = 'nsync'.DIRECTORY_SEPARATOR.'nsync.php';
+			
+			// if ( is_plugin_active( $nsync_plugin ) ) {	
+			delete_post_meta( $post_id, '_nsync_last_published_to' );		
+				// add_post_meta($post_id, '_nsync_last_published_to', array(), true) || update_post_meta($post_id, '_nsync_last_published_to', array() );
+			// }
 			// also need to trash all external posts before returning
-			$trash = Nsync_Posts::_trash_posts(array());
+			$trash = Nsync_Posts::_trash_posts( array() );
 			
 			//show message
 			if (!empty($trash)) {
