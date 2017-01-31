@@ -1,15 +1,27 @@
 <?php 
 
+/**
+ * Adds functionality so a network site can puch its posts to a parent network site.
+ *
+ * @author     ctlt
+ * @version    1.1
+ */
 
 class Nsync_Push {
-	// 
+	
+	// variables  
 	static $settings = array();
 	static $default_settings = array();
 	static $currently_publishing = false;
 	static $post_from = array();
 	static $previous_from = null;
 	
+   /**
+	* Initiate the the functionality
+	*
+	*/
 	public static function admin_init() {
+		
 		self::$settings = get_option( 'nsync_options' );
 		self::$default_settings = get_option('nsync_default');
 		
@@ -34,9 +46,14 @@ class Nsync_Push {
 		
 	}
 	
-	/* SETTINGS */
+   /**
+	* Adds checkbox inputs to settings writting page where you can see what sites you are pushing to.
+	*
+	*/
 	public static function add_network_sites() {
+	
 		global $current_user;
+	
 		$post_to = get_option( 'nsync_post_to' );
 		$current_blog_id = get_current_blog_id();
 		if (empty($post_to)) {
@@ -68,6 +85,10 @@ class Nsync_Push {
 		<?php 
 	}
 	
+   /**
+	* enqueue all the necessary scripts for the plugin
+    *
+    */
 	public static function post_to_script_n_style() {
 		
 		wp_enqueue_script( 'nsync-post-to' );
@@ -76,12 +97,17 @@ class Nsync_Push {
 	}
 	
 	
-	/* POST SIDE */
+    /**
+	* Adds the checkbox to the post to trigger the push.
+	*
+	*/
 	public static function user_select_site() {
+		
 		global $post;
+		
 		$post_to = get_option( 'nsync_post_to' );
 		$current_blog_id = get_current_blog_id();
-		$last_published_to = get_post_meta($post->ID, '_nsync_last_published_to', true);
+		$last_published_to = get_post_meta( $post->ID, '_nsync_last_published_to', true );
 
 		// lets make sure that the profile 
 		if( !defined( 'NSYNC_DIR_PATH' ) ):
@@ -89,7 +115,7 @@ class Nsync_Push {
 		
 			if( !empty(self::$post_from) ) :
 				$bloginfo = get_blog_details( array( 'blog_id' => self::$post_from['blog'] ) ); 
-				$post_from_url = esc_url($bloginfo->siteurl) . '/?p=' . self::$post_from['post_id'];	
+				$post_from_url = esc_url( $bloginfo->siteurl ) . '/?p=' . self::$post_from['post_id'];	
 			?>
 				<div class="misc-pub-section" id="shell-site-to-post">Originally posted on:
 					<em><?php echo $bloginfo->blogname; ?></em> <a href="<?php echo $post_from_url; ?>">view post</a>
@@ -103,11 +129,12 @@ class Nsync_Push {
 			// change this line if you also want to effect pages or other post types. 
 			if( is_array( $post_to ) && $post->post_type == 'post' && !empty($post_to) ):
 				
-				// double check if this  really the case
+				// double check if this really the case
 				$new_post_to = array();
 				
 				$previous_to = get_post_meta( $post->ID, '_nsync-to', false );
 				$site_display = null;
+				
 				foreach( $post_to as $blog_id ): 
 						switch_to_blog( $blog_id );
 						$option =	get_option( 'nsync_options' );
@@ -127,6 +154,7 @@ class Nsync_Push {
 							$site_display[] = $blog->blogname;
 						endif;	
 				endforeach;
+				
 				$diff = array_diff ( $new_post_to , $post_to );
 				
 				if( ! empty( $diff ) ):
@@ -172,8 +200,17 @@ class Nsync_Push {
 		endif;
 	}
 	
+   /**
+	* Validate post ids. check they are unique and in the list.
+	* 
+    * @param array $input                    sites that can push
+	*
+	* @return array $default_sites/$input    sites that can pucs
+	*/
 	public static function validate($input) {
+		
 		$default_sites = array();
+		
 		if (isset($input['sites']) && is_array($input['sites'])) {
 			//check for unique ids to potentially save checks
 			$default_sites['sites'] = array_unique($input['sites']);
@@ -190,12 +227,12 @@ class Nsync_Push {
 		return $default_sites;
 	}
 	
-	/**
-	 * determines whether it is a new post or editing post
-	 * 
-	 * @param string $type valid values are "edit","new"
-	 * @return int
-	 */
+   /**
+	* determines whether it is a new post or editing post
+	* 
+	* @param string $type valid values are "edit","new"
+	* @return int
+	*/
 	private static function _is_edit_or_new_post($type) {
 		$current_url = parse_url($_SERVER['REQUEST_URI']);
 		switch ($type) {

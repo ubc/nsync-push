@@ -1,6 +1,15 @@
 <?php
 
+/**
+ * Adds functionality so a network site can puch its posts to a parent network site.
+ *
+ * @author     ctlt
+ * @version    1.1
+ */
+
 class Nsync_Posts {
+	
+	// global variables
 	static $currently_publishing = false;
 	static $current_blog_id = null;
 	static $own_post = null;
@@ -18,11 +27,19 @@ class Nsync_Posts {
 	static $custom_fields = null;
 	static $last_publish_to = null;	//holds info on last selected site for post meta
 
+   /**
+	* Compile all the post data and pass it onto the new site
+	*
+	* @param integer $post_id    id of the post being pushed from site.
+	* @param object  $post       information stored on the post.
+	*
+	*/
 	public static function save_postdata( $post_id, $post ) {
 
 		// verify if this is an auto save routine.
-		// If it is our form has not been submitted, so we dont want to do anything
+		// If it is our form has not been submitted, so we dont want to do anything.
 		if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) return;
+		
 		// Check permissions
 		if (isset($_POST['post_type']) && 'post' == $_POST['post_type'] && $post->post_type == 'post'  ){
 			if ( !current_user_can( 'edit_post', $post_id ) )
@@ -30,23 +47,23 @@ class Nsync_Posts {
 		} else {
 			return;
 		}
+		
 		// verify this came from the our screen and with proper authorization,
-		// because save_post can be triggered at other times
+		// because save_post can be triggered at other times.
 		if (isset($_POST['nsync_noncename']) && !wp_verify_nonce( $_POST['nsync_noncename'], 'nsync' ) ):
 			// delete the connection
 			return;
 		endif;
 
 
-		// don't go into an infinate loop
+		// don't go into an infinate loop.
 		if( self::$currently_publishing )
 			return;
 
 		self::$current_blog_id = get_current_blog_id();
-
 		self::$currently_publishing = true;
 
-		// where did we previously created or updated a post, used for making sure that we update the same post
+		// where did we previously created or updated a post, used for making sure that we update the same post.
 		Nsync_Posts::$previous_to = get_post_meta( $post_id, '_nsync-to', false );
 
 
@@ -56,16 +73,13 @@ class Nsync_Posts {
 			add_post_meta($post_id, '_nsync_last_published_to', $blogs_to_post_to, true) || update_post_meta($post_id, '_nsync_last_published_to', $blogs_to_post_to);
 
 		} else {
-			// $nsync_plugin = 'nsync'.DIRECTORY_SEPARATOR.'nsync.php';
 
-			// if ( is_plugin_active( $nsync_plugin ) ) {
 			delete_post_meta( $post_id, '_nsync_last_published_to' );
-				// add_post_meta($post_id, '_nsync_last_published_to', array(), true) || update_post_meta($post_id, '_nsync_last_published_to', array() );
-			// }
-			// also need to trash all external posts before returning
+
+			// also need to trash all external posts before returning.
 			$trash = Nsync_Posts::_trash_posts( array() );
 
-			//show message
+			// show message.
 			if (!empty($trash)) {
 				setcookie( "nsync_trash_".$post_id, serialize ($trash['newly_trashed_ids']), time()+60*5 );
 			}
@@ -73,7 +87,7 @@ class Nsync_Posts {
 		}
 
 		// we are going to remove stuff from here
-		Nsync_Posts::clean_post( $post ); //
+		Nsync_Posts::clean_post( $post );
 		Nsync_Posts::setup_taxonomies( $post_id );
 		Nsync_Posts::setup_attachments( $post_id );
      	Nsync_Posts::setup_post_meta( $post_id );
@@ -102,10 +116,10 @@ class Nsync_Posts {
 
 				unset( $nsync_options );
 				$nsync_options = get_option( 'nsync_options' );
-				// can I accually post there?
 
 				// double check that the current site accually allows you to publish here
 				if( in_array( self::$current_blog_id, $nsync_options['active'] ) ):
+					
 					// create the new post
 					Nsync_Posts::set_post_id( $blog_id );
 					Nsync_Posts::replicate_categories( $nsync_options );
@@ -114,7 +128,9 @@ class Nsync_Posts {
 
 					$new_post_id = Nsync_Posts::insert_post( $nsync_options );
 					Nsync_Posts::replicate_post_meta( $new_post_id  );
-					Nsync_Posts::replicate_attachments( $nsync_options, $new_post_id );
+					
+					// added post_id as parameter because it was being referenced in function 
+					Nsync_Posts::replicate_attachments( $nsync_options, $new_post_id, $post_id);
 
 					if( !is_null( $new_post_id ) && $new_post_id != 0 ):
 						$to[ $blog_id ] = $new_post_id;
@@ -134,7 +150,13 @@ class Nsync_Posts {
 			endif;
 
 	}
-
+	
+   /**
+	* Removes unwanted post metadata
+	*
+	* @param object  $post       information stored on the post.
+	*
+	*/
 	public static function clean_post( $post ) {
 
 		// remove unwanted things
@@ -151,6 +173,14 @@ class Nsync_Posts {
 
 		self::$remote_post = $post;
 	}
+	
+   /**
+	* Removes unwanted attachment metadata
+	*
+	* @param object  $attachment  attachments assoicated to post
+	*
+	* @return string $attachment  cleaned attachment object
+	*/
 	public static function clean_attachment( $attachment ) {
 		unset(
 			$attachment->ID,
@@ -164,42 +194,55 @@ class Nsync_Posts {
 		);
 		return $attachment;
 	}
-
-	public static function path_to_file( $attachment_guid, $upload ) {
-
-		$stack = explode( 'files', $attachment_guid  );
-		$filename = array_pop( $stack );
-
-		return $upload["basedir"].$filename;
+	
+   /**
+	* based on the current path to the attachment create a new path to the parent
+	*
+	* @param string  $attachment_guid   the current upload path of the attachement 
+	* @param array   $upload            list of the current upload data
+	* @param string  $base              base upload directory
+	*
+	* @return string  cleaned attachment object
+	*/
+	public static function path_to_file( $attachment_guid, $upload, $base) {
+		$file = explode( $upload["baseurl"], $attachment_guid )[1];
+		
+		return $base . $file;
 	}
-
+	
+   /**
+	* copies the pushed post attachment media to the parent site uploads
+	*
+	* @param string  $attachment_guid   the current upload path of the attachement
+	*
+	* @return string   if the copy was successful or not
+	*/
 	public static function copy_file( $attachment_guid ) {
 
-		$current_file 	= Nsync_Posts::path_to_file( $attachment_guid, self::$current_upload );
-		$new_file 		= Nsync_Posts::path_to_file( $attachment_guid, wp_upload_dir() );
-
-		if( file_exists($current_file) && is_file($current_file) ):
+		$current_file = Nsync_Posts::path_to_file( $attachment_guid, self::$current_upload,  self::$current_upload["basedir"]);
+		$new_file = Nsync_Posts::path_to_file( $attachment_guid, self::$current_upload,  wp_upload_dir()["basedir"]);
+		
+		if ( file_exists($current_file) && is_file($current_file) ):
 			// copy the file
-			if( copy( $current_file, $new_file ) )
+			if( copy( $attachment_guid, $new_file ) ) {
 				return $new_file;
-			else
+			} else {
+
 				return false;
+			}
 		endif;
 		return false;
 	}
+	
+   /**
+	* set up the new taxonomies on the copied post
+	*
+	* @param integer  $post_id   the id of the pushed post
+	*
+	*/
 	public static function setup_taxonomies( $post_id ) {
 
 		$taxonomies = apply_filters( 'nsync_setup_taxonomies', array( 'category', 'post_tag' , 'post_format' ) );
-
-
-		/* $args= array(
-		  'public'   => true,
-		  '_builtin' => false,
-		  'show_ui'  => true,
-		  'object_type' => array('post')
-		);
-		$tax = get_taxonomies('','names');
-		var_dump($tax); */
 
 		$terms = wp_get_object_terms( $post_id, $taxonomies  );
 		$new_terms = array();
@@ -218,50 +261,46 @@ class Nsync_Posts {
 
 		self::$remote_post->tax_input = $new_terms;
 	}
-
+	
+   /**
+	* Gets the attachments from the pushed post and and setups the attachments for the new one. 
+	*
+	* @param string  $post_id   the id of the pushed post
+	*
+	*/
 	public static function setup_attachments( $post_id ) {
-		$args = array(
-			'numberposts' => -1,
-			'order'=> 'DESC',
-			'post_parent' => $post_id,
-			'post_type' => 'attachment'
-		);
 
-	self::$attachments = Nsync_Posts::get_attachments( $post_id );  //returns Array ( [$image_ID]...
-	self::$current_upload = wp_upload_dir();
-	self::$featured_image = get_post_thumbnail_id( $post_id  );
+		// changed to use wordpress' built in get_attachment_media
+		self::$attachments = get_attached_media( '', $post_id );  //returns Array ( [$image_ID]...
 
-	$featured_image_not_found = true;
+		self::$current_upload = wp_upload_dir();
+		self::$featured_image = get_post_thumbnail_id( $post_id  );
 
-	foreach( self::$attachments as $attach ):
-		self::$current_attach_data[$attach->ID] = wp_get_attachment_metadata( $attach->ID );
+		$featured_image_not_found = true;
+		
+		// cycle through all the attachments
+		foreach( self::$attachments as $attach ):
+			self::$current_attach_data[$attach->ID] = wp_get_attachment_metadata( $attach->ID );
 
-		if( self::$featured_image == $attach->ID )
-			$featured_image_not_found = false;
- 	endforeach;
+			if ( self::$featured_image == $attach->ID ) {
+				$featured_image_not_found = false;
+			}
+				
+	 	endforeach;
 
- 	if( $featured_image_not_found &&  self::$featured_image ):
- 		self::$current_attach_data[self::$featured_image] = wp_get_attachment_metadata( self::$featured_image );
- 		self::$attachments[] = get_post( self::$featured_image );
-	endif;
-
-
+	 	if( $featured_image_not_found &&  self::$featured_image ):
+	 		self::$current_attach_data[self::$featured_image] = wp_get_attachment_metadata( self::$featured_image );
+	 		self::$attachments[] = get_post( self::$featured_image );
+		endif;
 
 	}
 
-
-
-	public static function get_attachments( $post_id ) {
-		$args = array(
-			'numberposts' => -1,
-			'order'=> 'DESC',
-			'post_parent' => $post_id,
-			'post_type' => 'attachment'
-		);
-
-		return get_children( $args );  //returns Array ( [$image_ID]...
-	}
-
+   /**
+	* globally stores the pushed post id
+	*
+	* @param string  $post_id   the id of the pushed post
+	*
+	*/
 	public static function set_post_id( $blog_id ) {
 
 		if( isset( self::$previous_to[0][$blog_id] ) ):
@@ -273,47 +312,56 @@ class Nsync_Posts {
 		endif;
 	}
 
+   /**
+	* recreates the categories from the previous post taking into account the post admin settings. 
+	*
+	* @param array  $nsync_options   the options set by the admin from nsync plugin
+	*
+	*/
 	public static function replicate_categories( $nsync_options ) {
+		
 		$new_category_ids = array();	//to hold ids of newly create categories!
 		$existing_category_slugs = array();	//array of destination slugs and term_ids to compare against
 		$current_blogs_category = get_categories(array('hide_empty'=> 0));
 		$include_new_cats_tags = isset($nsync_options['include_new_cats_tags'])? $nsync_options['include_new_cats_tags'] : false;
-
-		//create term_id => name array
+		
 		foreach ($current_blogs_category as $cat) {
 			$existing_category_slugs[$cat->term_id] = $cat->slug;
 		}
 
-		foreach( self::$new_categories as $new_category ):
+		foreach ( self::$new_categories as $new_category ) {
+			
 			if (!isset($include_new_cats_tags) || empty($include_new_cats_tags)) {
 				$new_category_ids[] = wp_create_category( $new_category->name );
 			} else {
 				//only allow categories to match if they exist in destination's blog
 				$found_cat_id = array_search($new_category->slug, $existing_category_slugs);
+		
 				if ($found_cat_id) {
-					$new_categoriy_ids[] = $found_cat_id;
+					$new_category_ids[] = $found_cat_id;
 				}
 			}
-		endforeach;
+		}
 
 		// add the post to a specific category
-		if( isset( $nsync_options['category'] )
+		if ( isset( $nsync_options['category'] ) 	
 			&& $nsync_options['category'] != '-1'
-			&& in_array( $nsync_options['category'], $new_category_ids ) ):
-			$new_categoriy_ds[] = $nsync_options['category'];
+			&& !in_array( $nsync_options['category'], $new_category_ids ) ) {
+				
+			$new_category_ids[] = $nsync_options['category'];
+		}
 
-		endif;
-
-		if( !empty( $new_category_ids ) ):
+		if ( !empty( $new_category_ids ) ) {
 			self::$remote_post->post_category = $new_category_ids;
-		endif;
+		}
 	}
 
-	/**
-	 *
-	 * @param unknown $nsync_options
-	 * @TODO might need to update this function for heirarchical stuff.... but not sure.
-	 */
+   /**
+	* replicates the taxonomies hierachially and stores them within the class.
+	*
+	* @param array  $nsync_options   the options set by the admin from nsync plugin
+	*
+	*/
 	public static function replicate_hierarchical_taxonomies( $nsync_options ) {
 		$new_taxonomy = array();
 
@@ -326,11 +374,14 @@ class Nsync_Posts {
 
 		self::$remote_post->tax_input = array_merge( self::$remote_post->tax_input, $new_taxonomy );
 	}
-
+	
+   /**
+	* replicates the post meta and stores the meta within the class.
+	*
+	* @param integer  $post_id   id of the pushed post.
+	*
+	*/
 	public static function setup_post_meta( $post_id ) {
-		// post meta should be duplicated.
-		// $meta = get_post_meta( $post_id );
-
 
 		$fields = get_post_custom( $post_id );
 
@@ -342,6 +393,12 @@ class Nsync_Posts {
 		endforeach;
 	}
 
+   /**
+	* If admin has chosen a certian post status set the pushed post to that status. 
+	*
+	* @param array  $nsync_options   the options set by the admin from nsync plugin
+	*
+	*/
 	public static function set_post_status( $nsync_options, $post ) {
 
 		// overwrite the post status
@@ -350,17 +407,26 @@ class Nsync_Posts {
 		else
 			self::$remote_post->post_status = $post->post_status;
 	}
-
+	
+   /**
+	* Insert the post. If the user limits to non contributers or subscribers return.
+	*
+	* @param array  $nsync_options   the options set by the admin from nsync plugin
+	*
+	* @return boolean  the result of the inserted post.
+	*
+	*/
 	public static function insert_post( $nsync_options ) {
 
-		/*
-		echo "<pre>";
-		var_dump(self::$remote_post->tax_input);
-		echo "</pre>";
-		*/
 		do_action( 'nsync_before_insert' );
-		if( isset( $nsync_options['force_user'] ) &&  $nsync_options['force_user'] ) {
-			if( user_can( self::$remote_post->post_author, 'publish_post' ) ) {
+		if ( isset( $nsync_options['force_user'] ) &&  $nsync_options['force_user'] ) {
+			
+			$roles = get_userdata( self::$remote_post->post_author )->roles;
+			if ( in_array("contributor", $roles) || in_array("subscriber", $roles) ) {
+				return null;
+			} 
+			
+			if ( user_can( self::$remote_post->post_author, 'publish_posts' ) ) {
 				return wp_insert_post( self::$remote_post );
 			} else {
 				return null;
@@ -369,7 +435,13 @@ class Nsync_Posts {
 			return wp_insert_post( self::$remote_post );
 		}
 	}
-
+	
+   /**
+	* Replicate post meta from pushed post to newly created post
+	*
+	* @param array  $new_post_id   the id of the newly created post.
+	*
+	*/
 	public static function replicate_post_meta( $new_post_id ) {
 
 		if( is_array(self::$custom_fields) ):
@@ -385,34 +457,47 @@ class Nsync_Posts {
 		endif;
 
 	}
-
-	public static function replicate_attachments( $nsync_options, $new_post_id ) {
-
-		if( isset( $nsync_options['duplicate_files'] ) &&  $nsync_options['duplicate_files'] ):
+	
+	/**
+	 * Replicate post meta from pushed post to newly created post
+	 *
+	 * @param array    $nsync_options   the id of the newly created post.
+	 * @param integer  $new_post_id     newly created post id
+	 * @param array    $post_id         post id of the pushed post
+	 *
+	 */
+	public static function replicate_attachments( $nsync_options, $new_post_id, $post_id) {
+		
+		if ( isset( $nsync_options['duplicate_files'] ) &&  $nsync_options['duplicate_files'] ):
+		
 			// lets clean up the attacments first though
 			if( self::$update_post ){
-				$delete_attachements = Nsync_Posts::get_attachments( $post_id );
+				// changed to use wordpress' built in get_attached_media
+				$delete_attachements = get_attached_media('', $post_id );;
+		
 				if( is_array( $delete_attachements ) ):
-					foreach( $delete_attachements as $delete )
+					foreach( $delete_attachements as $delete ) {
 						wp_delete_attachment( $delete->ID, true );
+					}
+					
 				endif;
 			}
 
 			foreach( self::$attachments as $attachment):
 
 				$current_attachment_id = $attachment->ID;
+	
 				// copy over the file
-				$filename = Nsync_Posts::copy_file( $attachment->guid );
+				$filename = Nsync_Posts::copy_file( $attachment->guid);
 				$attachment = Nsync_Posts::clean_attachment( $attachment );
 				$attach_id = wp_insert_attachment( $attachment, $filename, $new_post_id );
 	 			$attach_data = wp_generate_attachment_metadata( $attach_id, $filename );
-
+	 	
 	  			wp_update_attachment_metadata( $attach_id,  $attach_data );
 	  			Nsync_Posts::update_content( $attach_data, self::$current_attach_data[$current_attachment_id], $new_post_id );
 
-
 				// lets set the post_thumbnail
-				if( self::$featured_image == $current_attachment_id )
+				if ( self::$featured_image == $current_attachment_id )
 					set_post_thumbnail( $new_post_id, $attach_id );
 
 			endforeach;
@@ -420,39 +505,54 @@ class Nsync_Posts {
 		endif;
 
 	}
-
+    
+   /**
+	* update the content of the posts, if attachments copied over replace old references. 
+	*
+	* @param array    $attach_data             all the attachment data on the pushed post such as thumbnails and sizes
+	* @param integer  $current_attach_data     newly created post id
+	* @param array    $new_post_id             all the attachment data on the newly created post such as thumbnails and sizes
+	*
+	*/
 	public static function update_content( $attach_data, $current_attach_data, $new_post_id ) {
 
-		// return;
-		$current_url = self::$current_upload['baseurl'];
-
-		$remote_url = get_site_url().'/files';
+		
+		$stack = substr( strrchr( $attach_data['file'], '/' ), 1 );
+		$filename = str_replace($stack, '', $attach_data['file']);
+		
+	    $current_url = self::$current_upload['baseurl'];
+	    
+		$blog_details = get_blog_details(self::$current_blog_id);
+		$remote_url = str_replace($blog_details->blogname . "/", "", wp_upload_dir()["baseurl"]);
+		
 
 		// set to empty array so that we don't worry about anything
 		self::$replacement = array();
 		self::$replacement['current'] = array();
 		self::$replacement['remote'] = array();
 
-		self::$replacement['current'][]   = $current_url.'/'.$attach_data['file'];
-		self::$replacement['remote'][] = $remote_url.'/'.$attach_data['file'];
+		self::$replacement['current'][]   = $current_url . '/' . $attach_data['file'];
+		self::$replacement['remote'][] = $remote_url . '/' . $attach_data['file'];
+
+		$cur_with_date = $current_url . '/' . $filename;
+		$rem_with_date = $remote_url . '/' . $filename;
 
 		if( is_array($current_attach_data['sizes']) ):
 			foreach( $current_attach_data['sizes'] as $size => $data ):
 
 				if( $attach_data['sizes'][$size]['file'] ):
-					self::$replacement['current'][]   = $current_url.'/'.$data['file'];
-					self::$replacement['remote'][] = $remote_url.'/'.$attach_data['sizes'][$size]['file'];
+					self::$replacement['current'][]   = $cur_with_date . $data['file'];
+					self::$replacement['remote'][] = $rem_with_date . $attach_data['sizes'][$size]['file'];
 				endif;
 			endforeach;
 		endif;
-		// if( self::$replacement['current'] ) not sure if this was supposed to be deleted.
 
-		// wp_delete_post( $postid, true );
 		// replace all the string
 		$update['ID'] = $new_post_id;
-  		$update['post_content'] = str_replace ( self::$replacement['current'] , self::$replacement['remote'] , self::$remote_post->post_content  );
-  		if( $update['post_content'] != self::$remote_post->post_content ):
+  
+  		$update['post_content'] = str_replace ( $cur_with_date , $rem_with_date , self::$remote_post->post_content  );
 
+  		if( $update['post_content'] != self::$remote_post->post_content ):
   			// lets erase the last revision because we are about to creat a new one. :$
   			$revisions = wp_get_post_revisions( $new_post_id );
   			$last_one = array_slice($revisions, 0, 3);
@@ -462,7 +562,14 @@ class Nsync_Posts {
 		endif;
 
 	}
-
+	
+   /**
+	* update the content of the posts, if attachments copied over replace old references.
+	*
+	* @param integer    $post_id     all the attachment data on the pushed post such as thumbnails and sizes
+	* @param unknown    $to         newly created post id
+	*
+	*/
 	public static function update_nsync_to( $post_id, $to ) {
 		// update the to
 		if( self::$previous_to == null )
@@ -470,12 +577,19 @@ class Nsync_Posts {
 		else
 			update_post_meta( $post_id, '_nsync-to', $to, self::$previous_to );
 	}
-
+	
+   /**
+	* update  the post messages
+	*
+	* @param array   $messages     list of all the post messages. 
+	*
+	* @return array  $messages     list of new messages for post.
+	*/
 	public static function update_message( $messages ) {
 		global $post;
 
 		if( !empty( $_COOKIE['nsync_update_'.$post->ID] )  ):
-			// setcookie("nsync_update", null, time()-3600);
+
 			$cookie = unserialize ( $_COOKIE['nsync_update_'.$post->ID] );
 			foreach( $cookie as $blog_id => $post_id ):
 				$bloginfo = get_blog_details( array( 'blog_id' => $blog_id ) );
@@ -518,7 +632,14 @@ class Nsync_Posts {
 
 		return $messages;
 	}
-
+	
+   /**
+	* Check if the post is in trash and trash or untrash post based on response. 
+	*
+	* @param integer   $post_id    new post id
+	*
+	* @return nothing.
+	*/
 	public static function trash_or_untrash_post( $post_id ) {
 
 		if( self::$currently_publishing )
@@ -559,7 +680,15 @@ class Nsync_Posts {
 		endforeach;
 
 	}
-
+	
+   /**
+	* Shows on the network blog site posts view what posts have been pushed to parent when hovered over.
+	*
+	* @param  array  $actions    array of action links shown under each post when hovered over. 
+	* @param  object  $post      post information.
+	*
+	* @return array  $actions   list of action links shown under each post when hovered over with the new action added. 
+	*/
 	public static function posts_display_sync( $actions, $post ) {
 
 		//use last publish to, but massage array to minimize code change
@@ -578,12 +707,12 @@ class Nsync_Posts {
 
 			foreach( $post_check as $blog_id => $post_id ):
 				$bloginfo = get_blog_details( array( 'blog_id' => $blog_id ) );
-				$end[] = '<em>'.$bloginfo->blogname.'</em> <a href="'.esc_url( $bloginfo->siteurl ).'/?p='.$post_id.'">view post</a>';
+				$end[] = '<em>'.$bloginfo->blogname.'</em> <a href="'.esc_url( $bloginfo->siteurl ).'/?p='.$post_id.'">| View post</a>';
 			endforeach;
 
 			$end = " " . implode( ", ",  $end );
 
-			$actions['sync'] = "Also posted to: ".$end;
+			$actions['sync'] = "<p>Also posted to: " . $end . "</p>";
 		endif;
 		if( !defined( 'NSYNC_BASENAME') ):
 			// do this if nsync is not present
@@ -594,7 +723,7 @@ class Nsync_Posts {
 				$bloginfo = get_blog_details( array( 'blog_id' => self::$previous_from['blog'] ) );
 				$end = '<em>'.$bloginfo->blogname.'</em> <a href="'.esc_url( $bloginfo->siteurl ).'/?p='.self::$previous_from['post_id'].'">view post</a>';
 
-				$actions['sync'] = "Originally posted on: ".$end;
+				$actions['sync'] = "<p>Originally posted on: " . $end . "</p>";
 			endif;
 		endif;
 
@@ -605,9 +734,11 @@ class Nsync_Posts {
 	 * modifies single posts to add source template before or after posts
 	 *
 	 * @param unknown $content
+	 * 
 	 * @return Ambigous <string, unknown>
 	 */
 	public static function nsync_post_edit_single_post($content) {
+		
 		unset( $nsync_options );
 		$nsync_options = get_option( 'nsync_options' );
 
@@ -628,18 +759,19 @@ class Nsync_Posts {
 		return $return_content;
 	}
 
-	/**
-	 * private function to convert special tags in the source tempate into actual values
-	 * - valid values:
-	 *  - - {site permalink}
-	 *  - - {post permalink}
-	 *  - - {post date}
-	 *  - - {post title}
-	 *  - - {post author}
-	 *  - - {site name}
-	 *
-	 * @return string
-	 */
+   /**
+    * private function to convert special tags in the source tempate into actual values.
+    * 
+	* - valid values:
+	*  - - {site permalink}
+	*  - - {post permalink}
+	*  - - {post date}
+	*  - - {post title}
+	*  - - {post author}
+	*  - - {site name}
+	*
+	* @return string $template    
+	*/
 	private static function process_source_template() {
 		global $post;
 
@@ -676,8 +808,18 @@ class Nsync_Posts {
 
  		return $template;
 	}
-
+	
+	/**
+	 * Shows on the network blog site posts view what posts have been pushed to parent when hovered over.
+	 *
+	 * @param  string   $url         url for permalink.
+	 * @param  object   $post        post information.
+	 * @param  string   $leavename   blank.
+	 *
+	 * @return array  $url   url for permalink.
+	 */
 	public static function nsync_post_link( $url, $post, $leavename ) {
+		
 		//check if it's a post from nsync
 		$nsync_options = get_option( 'nsync_options' );
 		$link_to_source = (isset($nsync_options['link_to_source'])? $nsync_options['link_to_source'] : 0 );
@@ -696,6 +838,10 @@ class Nsync_Posts {
 		return $url;
 	}
 
+   /**
+	* Shorten link, sets globally within class
+	*
+	*/
 	public static function nsync_shortlink() {
 		global $post;
 
@@ -708,11 +854,14 @@ class Nsync_Posts {
 			 <?php
 		}
 	}
-
-	/**
-	 * private trashing function on a per post basis in
-	 * @param string $force_all
-	 */
+	
+   /**
+	* private trashing function on a per post basis in
+	* 
+	* @param string $last_post_to
+	* 
+	* @return array  $formatted_trashed_array  array formatted for trash.
+	*/
 	private static function _trash_posts($last_post_to = null) {
 		//trash posts
 		$last_publish_to = (!is_null($last_post_to) ? $last_post_to : Nsync_Posts::$last_publish_to);
