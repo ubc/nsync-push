@@ -169,7 +169,7 @@ class Nsync_Push {
 					
 					<label >Also publish to:</label>
 					
-					<span id="site-display"> <?php echo ( is_array( $site_display ) ? '<strong>'.implode( $site_display, ",") . '</strong>': " (select a site)"); ?></span>
+					<span id="site-display"> <?php echo ( is_array( $site_display ) ? '<strong>'.implode( ", ", $site_display ) . '</strong>': " (select a site)"); ?></span>
 					
 					<div id="site-to-post" class="hide-if-js">
 						<?php 
